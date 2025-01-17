@@ -1,0 +1,7 @@
+jldenn@U22:~/work/assignment-2-JLDenn/finder-app$ make clean
+jldenn@U22:~/work/assignment-2-JLDenn/finder-app$ make CROSS_COMPILE=aarch64-none-linux-gnu-
+aarch64-none-linux-gnu-gcc -Wall -Werror    -c -o writer.o writer.c
+aarch64-none-linux-gnu-gcc -o writer writer.o 
+jldenn@U22:~/work/assignment-2-JLDenn/finder-app$ file writer
+writer: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 3.7.0, with debug_info, not stripped
+jldenn@U22:~/work/assignment-2-JLDenn/finder-app$ 
