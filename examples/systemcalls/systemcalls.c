@@ -84,8 +84,8 @@ bool do_exec(int count, ...)
 		//We are the child, so we'll be executing the command provided
 		execv(command[0], command);
 		
-		
 		// Should never get here, unless execv errors
+		printf("*ERROR* - execv() call failed\n");
 		exit(-1);
 	}
 	
@@ -156,8 +156,8 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
 		//Execute the actual command using the new STDOUT file descriptor
 		execv(command[0], command);
 		
-		
-		// Should never get here, unless execv errors
+		// Should never get here, unless execv errors out
+		printf("*ERROR* - execv() call failed\n");
 		exit(-1);
 	}
 	
