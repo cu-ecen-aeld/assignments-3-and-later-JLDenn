@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # finder script for ECEN5713 AESD Assignment 1
 #Author: Justin Denning
 
