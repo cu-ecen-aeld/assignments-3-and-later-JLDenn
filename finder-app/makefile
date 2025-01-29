@@ -22,5 +22,5 @@ ${EXEC}: $(OBJ)
 .PHONY: clean
 
 clean:
-		@rm -rf *.o writer
+		@rm -rf *.o ${EXEC}
 
