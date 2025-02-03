@@ -25,6 +25,9 @@ else
 	WRITEDIR=/tmp/aeld-data/$3
 fi
 
+#change directory to the location of this script
+cd `dirname $0`
+
 MATCHSTR="The number of files are ${NUMFILES} and the number of matching lines are ${NUMFILES}"
 
 echo "Writing ${NUMFILES} files containing string ${WRITESTR} to ${WRITEDIR}"
@@ -49,9 +52,9 @@ then
 	fi
 fi
 
-#echo "Removing the old writer utility and compiling as a native application"
-#make clean
-#make
+echo "Removing the old writer utility and compiling as a native application"
+make clean
+make
 
 for i in $( seq 1 $NUMFILES)
 do
@@ -59,6 +62,7 @@ do
 done
 
 OUTPUTSTRING=$(./finder.sh "$WRITEDIR" "$WRITESTR")
+echo "$OUTPUTSTRING" > /tmp/assignment4-result.txt
 
 # remove temporary directories
 rm -rf /tmp/aeld-data
