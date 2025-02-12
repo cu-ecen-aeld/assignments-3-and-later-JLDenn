@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <syslog.h>
 #include <signal.h> 
+#include <pthread.h>
 
 
 #include "main.h"
@@ -17,7 +18,7 @@
 /***********************************************************************************
  *	The function called when a new client is connected
  **********************************************************************************/
-void processConnection(int clientSocket, uint32_t clientIP){
+void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fileLockMutex){
 	
 	DEBUG_PRINT("--Starting thread-per-connection\n");
 	
@@ -32,6 +33,7 @@ void processConnection(int clientSocket, uint32_t clientIP){
 	int dataSize = BLOCK_SIZE;
 	int dataLen = 0;
 	int outf = -1;
+	int rc;
 	ssize_t byteCount;
 	
 	DEBUG_PRINT("--Starting data receive loop\n");
@@ -93,6 +95,9 @@ void processConnection(int clientSocket, uint32_t clientIP){
 		DEBUG_PRINT("--Received a full packet (found '\\n' char)\n");
 		dataLen = (unsigned long)nl - (unsigned long)recvData + 1;
 		
+
+		
+		
 		//Open the output file since we're ready to write a full line
 		DEBUG_PRINT("--Opening the output file\n");
 		outf = open(FILE_PATH, O_APPEND | O_RDWR | O_CREAT, 0644);
@@ -102,6 +107,15 @@ void processConnection(int clientSocket, uint32_t clientIP){
 		}
 	
 		
+		//Obtain the mutex used to maintain file write integrety.
+		DEBUG_PRINT("--Locking the mutex for file write access\n");
+		rc=pthread_mutex_lock(fileLockMutex);
+		if(rc){
+			errno = rc;
+			perror("pthread_mutex_lock");
+			exit(1);
+		}
+		
 		//Write the data to the file we opened above
 		DEBUG_PRINT("--Writing data to the output file %s\n", FILE_PATH);
 		byteCount = write(outf, recvData, dataLen);
@@ -110,6 +124,14 @@ void processConnection(int clientSocket, uint32_t clientIP){
 			goto cleanupFail;
 		}
 		
+		//Release the mutex
+		DEBUG_PRINT("--Unocking the mutex\n");
+		rc=pthread_mutex_unlock(fileLockMutex);
+		if(rc){
+			errno = rc;
+			perror("pthread_mutex_lock");
+			exit(1);
+		}
 		
 		//Now rewind and read the entire file so we can send it
 		lseek(outf, 0, SEEK_SET);

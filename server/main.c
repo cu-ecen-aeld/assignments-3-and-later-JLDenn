@@ -17,6 +17,7 @@
 
 #include "connection.h"
 bool closeApplication = false;
+pthread_mutex_t fileWriteMutex;
 
 /***********************************************************************************
  *	The signal callback handler. 
@@ -124,6 +125,11 @@ int main(int argc, char* argv[]){
 		if(makeDaemon())
 			return 0;
 	}
+	
+	
+	//Start the periodic timer to handle the 10second timestamp writes
+	intervalTimerStart(&fileWriteMutex);
+	
 
 	//Begin listening for client connections
 	DEBUG_PRINT("Listening\n");
@@ -170,7 +176,7 @@ int main(int argc, char* argv[]){
 		//	a previous one. 
 		DEBUG_PRINT("Spawning child to handle request\n");
 		if(!fork()){
-			processConnection(clientSocket, ip);
+			processConnection(clientSocket, ip, &fileWriteMutex);
 			//Should never get here since the processConnection should exit when complete
 			exit(1);
 		}
