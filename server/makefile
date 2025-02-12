@@ -2,11 +2,11 @@
 #this assignment (assignment 2) for ECEN5713 spring 2025
 
 EXEC     = aesdsocket
-CC       = $(CROSS_COMPILE)gcc
+CC       ?= $(CROSS_COMPILE)gcc
 
-CFLAGS   = -Wall -Werror 
+CFLAGS   ?= -Wall -Werror 
 
-LDFLAGS  = 
+LDFLAGS  ?= 
 
 SRC      = $(wildcard *.c)
 OBJ      = $(SRC:.c=.o)

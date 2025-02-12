@@ -18,9 +18,10 @@ struct timerData{
 
 /**************************************************************************************/
 // Periodic timer (every 10 seconds) allowing us to add timestamps to our output file.
+//
+//	Runs from interval timer call
 void onInterval(union sigval arg){
 	
-
 	int rc;
 	struct timerData *td = arg.sival_ptr;
 	int outf;
@@ -28,7 +29,7 @@ void onInterval(union sigval arg){
 	
 	//Increment the number of calls we've handled
 	td->eventNumber++;
-	DEBUG_PRINT("---Handling event %lu\n", td->eventNumber);
+	DEBUG_PRINT("---Handling event %i\n", td->eventNumber);
 	
 	time_t rawTime;
 	time(&rawTime);
@@ -109,13 +110,13 @@ timer_t *intervalTimerStart(pthread_mutex_t *fileWriteMutex){
 	int rc=timer_create(CLOCK_REALTIME, &sev, &timerId);
 	if(rc){
 			perror("timer_create");
-			exit(-1);
+			exit(EXIT_FAILURE);
 	}
 	//Start the timer as configured. It will now call our scheduler() function every 10ms
 	rc=timer_settime(timerId, 0, &ts, NULL);
 	if(rc){
 			perror("timer_settime");
-			exit(-1);
+			exit(EXIT_FAILURE);
 	}
 
 	return timerId;

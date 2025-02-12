@@ -128,7 +128,7 @@ int main(int argc, char* argv[]){
 	
 	
 	//Start the periodic timer to handle the 10second timestamp writes
-	intervalTimerStart(&fileWriteMutex);
+	timer_t *timerId = intervalTimerStart(&fileWriteMutex);
 	
 
 	//Begin listening for client connections
@@ -178,7 +178,7 @@ int main(int argc, char* argv[]){
 		if(!fork()){
 			processConnection(clientSocket, ip, &fileWriteMutex);
 			//Should never get here since the processConnection should exit when complete
-			exit(1);
+			exit(EXIT_FAILURE);
 		}
 		
 		//Wait on any child threads that are complete. We don't actually wait, we
@@ -192,6 +192,9 @@ int main(int argc, char* argv[]){
 	//We must have received a signal (where we set the closeApplication), so we're ready to exit.
 	syslog(LOG_INFO, "Caught signal, exiting");
 	printf("\nWaiting for connections to complete, and exiting...\n");
+	
+	//Cancel the timer
+	timer_delete(timerId);
 	
 	waitForChildren();
 	close(socketHandle);

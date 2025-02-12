@@ -113,7 +113,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 		if(rc){
 			errno = rc;
 			perror("pthread_mutex_lock");
-			exit(1);
+			goto cleanupFail;
 		}
 		
 		//Write the data to the file we opened above
@@ -130,7 +130,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 		if(rc){
 			errno = rc;
 			perror("pthread_mutex_lock");
-			exit(1);
+			goto cleanupFail;
 		}
 		
 		//Now rewind and read the entire file so we can send it

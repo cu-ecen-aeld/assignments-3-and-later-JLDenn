@@ -17,7 +17,7 @@
 
 
 //Comment this to remove the verbose prints
-//#define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define DEBUG_PRINT(a, ...) printf(a, ##__VA_ARGS__)
