@@ -123,16 +123,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 			syslog(LOG_ERR, "write to %s failed", FILE_PATH);
 			//Ensure the mutext gets unlocked
 			pthread_mutex_unlock(fileLockMutex);
-			goto cleanupFail;
-		}
-		
-		//Release the mutex
-		DEBUG_PRINT("--Unocking the mutex\n");
-		rc=pthread_mutex_unlock(fileLockMutex);
-		if(rc){
-			errno = rc;
-			perror("pthread_mutex_lock");
-			goto cleanupFail;
+			goto cleanupFailInLock;
 		}
 		
 		//Now rewind and read the entire file so we can send it
@@ -155,7 +146,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 					continue;
 				
 				syslog(LOG_ERR, "read: %s", strerror(errno));
-				goto cleanupFail;
+				goto cleanupFailInLock;
 			}
 			
 			//Send the data we have in the buffer to the client
@@ -163,9 +154,20 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 			ssize_t bytesSent = send(clientSocket, recvData, byteCount, 0);
 			if(bytesSent != byteCount){
 				syslog(LOG_ERR, "error sending %li bytes to client", byteCount);
-				goto cleanupFail;
+				goto cleanupFailInLock;
 			}
 		}while(byteCount);
+		
+		
+		//Release the mutex
+		DEBUG_PRINT("--Unocking the mutex\n");
+		rc=pthread_mutex_unlock(fileLockMutex);
+		if(rc){
+			errno = rc;
+			perror("pthread_mutex_unlock");
+			goto cleanupFail;
+		}
+		
 		
 		DEBUG_PRINT("--Closing file\n");
 		close(outf);
@@ -186,6 +188,14 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 	free(recvData); 
 	exit(EXIT_SUCCESS);
 	
+
+//On fail inside the locked mutex area, we need to unlock that before we exit!
+cleanupFailInLock:
+	rc=pthread_mutex_unlock(fileLockMutex);
+	if(rc){
+		errno = rc;
+		perror("pthread_mutex_unlock");
+	}
 //On fail, we need to complete cleanup
 cleanupFail:
 	if(outf != -1)
