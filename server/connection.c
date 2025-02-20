@@ -11,14 +11,17 @@
 #include <signal.h> 
 #include <pthread.h>
 
-
+#include "linklist.h"
 #include "main.h"
 
 
 /***********************************************************************************
  *	The function called when a new client is connected
  **********************************************************************************/
-void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fileLockMutex){
+void *processConnection(void *arg){
+	
+	//Extract the content we'll need for this connection
+	ll_t *connectionItem = (ll_t*) arg;
 	
 	DEBUG_PRINT("--Starting thread-per-connection\n");
 	
@@ -27,8 +30,8 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 	unsigned char *recvData = malloc(BLOCK_SIZE);
 	if(!recvData){
 		syslog(LOG_ERR, "malloc: %s", strerror(errno));
-		close(clientSocket);
-		exit(EXIT_FAILURE);
+		close(connectionItem->socket);
+		return NULL;
 	}
 	int dataSize = BLOCK_SIZE;
 	int dataLen = 0;
@@ -40,7 +43,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 	while(1){
 		//Receive some data from the client
 		DEBUG_PRINT("--recieving the next block of data @ offset %i, (buffer size: %i)\n", dataLen, dataSize);
-		byteCount = recv(clientSocket, recvData + dataLen, dataSize - dataLen, 0);
+		byteCount = recv(connectionItem->socket, recvData + dataLen, dataSize - dataLen, 0);
 		if(byteCount == -1){
 			if(errno == EAGAIN || errno == EINTR)
 				continue;
@@ -109,7 +112,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 		
 		//Obtain the mutex used to maintain file write integrety.
 		DEBUG_PRINT("--Locking the mutex for file write access\n");
-		rc=pthread_mutex_lock(fileLockMutex);
+		rc=pthread_mutex_lock(connectionItem->mutex);
 		if(rc){
 			errno = rc;
 			perror("pthread_mutex_lock");
@@ -122,7 +125,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 		if(byteCount != dataLen){
 			syslog(LOG_ERR, "write to %s failed", FILE_PATH);
 			//Ensure the mutext gets unlocked
-			pthread_mutex_unlock(fileLockMutex);
+			pthread_mutex_unlock(connectionItem->mutex);
 			goto cleanupFailInLock;
 		}
 		
@@ -151,7 +154,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 			
 			//Send the data we have in the buffer to the client
 			DEBUG_PRINT("--Sending file data to client\n");
-			ssize_t bytesSent = send(clientSocket, recvData, byteCount, 0);
+			ssize_t bytesSent = send(connectionItem->socket, recvData, byteCount, 0);
 			if(bytesSent != byteCount){
 				syslog(LOG_ERR, "error sending %li bytes to client", byteCount);
 				goto cleanupFailInLock;
@@ -161,7 +164,7 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 		
 		//Release the mutex
 		DEBUG_PRINT("--Unocking the mutex\n");
-		rc=pthread_mutex_unlock(fileLockMutex);
+		rc=pthread_mutex_unlock(connectionItem->mutex);
 		if(rc){
 			errno = rc;
 			perror("pthread_mutex_unlock");
@@ -176,22 +179,23 @@ void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fil
 
 	//Ensure we shutdown the connection to properly before we close it (notifying the client 
 	//	we're done sending data)
-	if(shutdown(clientSocket, SHUT_RDWR))
+	if(shutdown(connectionItem->socket, SHUT_RDWR))
 		syslog(LOG_ERR, "shutdown: %s", strerror(errno));
 	
 	//Close our handle and log that we're done with this client
-	close(clientSocket);
+	close(connectionItem->socket);
+	uint32_t clientIP = connectionItem->ip;
 	syslog(LOG_INFO, "Closed connection from %u.%u.%u.%u",
 				clientIP >> 24, (clientIP >> 16) & 0xFF, (clientIP >> 8) & 0xFF, clientIP & 0xFF);
 	
 	//Free our buffer and exit
 	free(recvData); 
-	exit(EXIT_SUCCESS);
+	return NULL;
 	
 
 //On fail inside the locked mutex area, we need to unlock that before we exit!
 cleanupFailInLock:
-	rc=pthread_mutex_unlock(fileLockMutex);
+	rc=pthread_mutex_unlock(connectionItem->mutex);
 	if(rc){
 		errno = rc;
 		perror("pthread_mutex_unlock");
@@ -201,6 +205,6 @@ cleanupFail:
 	if(outf != -1)
 		close(outf);
 	free(recvData);
-	close(clientSocket);
-	exit(EXIT_FAILURE);
+	close(connectionItem->socket);
+	return NULL;
 }

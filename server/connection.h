@@ -5,6 +5,6 @@
 #include <pthread.h>
 
 //External function that handles connections
-void processConnection(int clientSocket, uint32_t clientIP, pthread_mutex_t *fileWriteMutex);
+void *processConnection(void *arg);
 
 #endif //CONNECTION_H

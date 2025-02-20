@@ -13,7 +13,7 @@
 //Structure used to pass data to the timer IRQ handler.
 struct timerData{
         int eventNumber;
-		pthread_mutex_t *fileWriteMutex;
+		pthread_mutex_t *fileAccessMutex;
 };
 
 /**************************************************************************************/
@@ -37,7 +37,7 @@ void onInterval(union sigval arg){
 	size_t timeStrLen = strftime(timeStr, sizeof(timeStr), "timestamp:%Y-%m-%d %H:%M:%S\n", locTime);
 	if(!timeStrLen){
 		printf("Error generating time string\n");
-		exit(-1);
+		exit(EXIT_FAILURE);
 	}
 
 	//Open the output file
@@ -50,11 +50,11 @@ void onInterval(union sigval arg){
 
 	//Obtain mutex for file writes
 	DEBUG_PRINT("---Locking the write file\n");
-	rc=pthread_mutex_lock(td->fileWriteMutex);
+	rc=pthread_mutex_lock(td->fileAccessMutex);
 	if(rc){
 		errno = rc;
 		perror("pthread_mutex_lock");
-		exit(1);
+		goto cleanupFail;
 	}
 	
 	//Write the data to the file we opened above
@@ -62,23 +62,31 @@ void onInterval(union sigval arg){
 	ssize_t byteCount = write(outf, timeStr, timeStrLen);
 	if(byteCount != timeStrLen){
 		syslog(LOG_ERR, "write to %s failed", FILE_PATH);
-		goto cleanupFail;
+		goto cleanupFailInLock;
 	}
 	
 	DEBUG_PRINT("---Unlocking the write file\n");
-	rc=pthread_mutex_unlock(td->fileWriteMutex);
+	rc=pthread_mutex_unlock(td->fileAccessMutex);
 	if(rc){
 		errno = rc;
 		perror("pthread_mutex_unlock");
-		exit(1);
+		goto cleanupFail;
 	}
 	
 	close(outf);
 	return;
 	
+//On fail inside the locked mutex area, we need to unlock that before we exit!
+cleanupFailInLock:
+	rc=pthread_mutex_unlock(td->fileAccessMutex);
+	if(rc){
+		errno = rc;
+		perror("pthread_mutex_unlock");
+	}	
 cleanupFail:
-	close(outf);
-	exit(-1);
+	if(outf != -1)
+		close(outf);
+	exit(EXIT_FAILURE);
 }
 
 
@@ -86,7 +94,7 @@ cleanupFail:
 
 /**************************************************************************************/
 // Function to setup the interval timer that will place timestamps in the output file
-timer_t *intervalTimerStart(pthread_mutex_t *fileWriteMutex){
+timer_t *intervalTimerStart(pthread_mutex_t *fileAccessMutex){
 	
 	//Configure the timer we'll be using to interrupt at our time slice (10ms)
 	timer_t timerId = 0;
@@ -94,7 +102,7 @@ timer_t *intervalTimerStart(pthread_mutex_t *fileWriteMutex){
 	//      actually start the scheduler period.
 	static struct timerData tData = {0};
 	tData.eventNumber = 0;
-	tData.fileWriteMutex = fileWriteMutex;
+	tData.fileAccessMutex = fileAccessMutex;
 	
 	struct sigevent sev = {0};
 	struct itimerspec ts = {.it_value.tv_sec = 0,
