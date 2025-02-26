@@ -220,6 +220,7 @@ int main(int argc, char* argv[]){
 		}
 
 		
+		
 		//Wait on any child threads that are complete. We don't actually wait, we
 		//	just collect any that are complete already (to de-zombie them). In other
 		//	words we'll be ignoring the return values.
@@ -230,7 +231,10 @@ int main(int argc, char* argv[]){
 		//
 		li = ll_getFirst();
 		while(li){
+			DEBUG_PRINT("Waiting for child 0x%08x\n", (unsigned int)li->thread);
 			if(!pthread_tryjoin_np(li->thread, NULL)){
+				DEBUG_PRINT("Child 0x%08x has completed\n", (unsigned int)li->thread);
+				
 				//The thread has exited, so we'll drop (free) the link list item
 				ll_dropItem(li);
 			}

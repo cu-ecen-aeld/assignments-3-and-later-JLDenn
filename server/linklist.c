@@ -17,12 +17,14 @@ void ll_dropItem(ll_t *dropLi){
 		if(li == dropLi){
 			if(prevLi)
 				prevLi->next = li->next;
-			else
+			else{
 				head = li->next;
+				prevLi = head;
+			}
 			
-			//Move the ittr down the list if it is pointing here. 
+			//Move the ittr up the list if it is pointing here. 
 			if(ittr == li)
-				ittr = li->next;
+				ittr = prevLi;
 			
 			free(li);
 			return;
@@ -66,9 +68,6 @@ ll_t *ll_getNext(){
 		return NULL;
 	
 	ittr = ittr->next;
-	if(!ittr)
-		return NULL;
-	
 	return ittr;
 }
 

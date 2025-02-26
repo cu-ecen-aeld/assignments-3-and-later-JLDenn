@@ -124,8 +124,6 @@ void *processConnection(void *arg){
 		byteCount = write(outf, recvData, dataLen);
 		if(byteCount != dataLen){
 			syslog(LOG_ERR, "write to %s failed", FILE_PATH);
-			//Ensure the mutext gets unlocked
-			pthread_mutex_unlock(connectionItem->mutex);
 			goto cleanupFailInLock;
 		}
 		
