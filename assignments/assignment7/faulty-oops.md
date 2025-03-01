@@ -46,8 +46,8 @@ Code: d2800001 d2800000 d503233f d50323bf (b900003f)
 ---[ end trace 0000000000000000 ]---
 ```
 # Analysis
-*First, we see that a NULL pointer dereference at address 0x00000000000000 caused the OOPS.<br>
-*We get a list of linked modules... in my case: faulty and scull.<br>
-*We get CPU state information, including register values. <br>
-*Then, we get a call trace showing the exception occurred at byte 0x10 of 0x20 (half way through the faulty_write function)<br>
+* First, we see that a NULL pointer dereference at address 0x00000000000000 caused the OOPS.<br>
+* We get a list of linked modules... in my case: faulty and scull.<br>
+* We get CPU state information, including register values. <br>
+* Then, we get a call trace showing the exception occurred at byte 0x10 of 0x20 (half way through the faulty_write function). This can also be seen in the pc : line where it shows the faulty_write @ offset 0x10 in [module] faulty<br>
 
