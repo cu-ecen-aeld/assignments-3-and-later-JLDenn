@@ -13,6 +13,9 @@
 #define BLOCK_SIZE		64
 #define FILE_PATH		"/var/tmp/aesdsocketdata"  
 
+#define TIMESTAMP_INTERVAL_S	10
+
+
 //Comment this to remove the verbose prints
 //#define DEBUG
 
@@ -22,6 +25,8 @@
 #define DEBUG_PRINT(a, ...)
 #endif
 
+//Extern functions
+timer_t *intervalTimerStart(pthread_mutex_t *fileWriteMutex);
 
 
 #endif 	//#define MAIN_H

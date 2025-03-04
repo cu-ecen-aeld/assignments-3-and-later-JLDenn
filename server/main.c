@@ -1,4 +1,5 @@
 
+#define _GNU_SOURCE
 #include <stdbool.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -14,9 +15,11 @@
 #include <fcntl.h>
 #include <time.h>
 #include "main.h"
+#include "linklist.h"
 
 #include "connection.h"
-bool closeApplication = false;
+static bool closeApplication = false;
+static pthread_mutex_t fileAccessMutex;
 
 /***********************************************************************************
  *	The signal callback handler. 
@@ -33,10 +36,13 @@ static void onSignal(int signum){
  *	Wait for all the child processes to complete and exit
  **********************************************************************************/
 static void waitForChildren(){
-	//Wait for any child processes that are still processing
-	struct timespec t = {.tv_sec = 0, .tv_nsec = 1000000}; //1ms
-	while(waitpid(-1, NULL, WNOHANG) >= 0)
-		nanosleep(&t, NULL);
+	//Wait for any child processes that are still processing	
+	ll_t *li = ll_getFirst();
+	while(li){
+		pthread_join(li->thread, NULL);
+		ll_dropItem(li);
+		li = ll_getFirst();
+	}
 }
 
 /***********************************************************************************
@@ -67,6 +73,10 @@ int main(int argc, char* argv[]){
 	bool runDaemon = false;
 	if(argc == 2 && !strcmp("-d" , argv[1]))
 		runDaemon = true;
+	else if(argc != 1){
+		printf("Usage: %s [-d]\nAdding -d will run the app as a daemon\n", argv[0]);
+		exit(EXIT_FAILURE);
+	}
 	
 	//Setup the syslog system so we can write to the syslog
 	setlogmask (LOG_UPTO (LOG_INFO));
@@ -117,13 +127,26 @@ int main(int argc, char* argv[]){
 		exit(EXIT_FAILURE);
 	}
 	
+	//Inialize the mutex we'll be using for file access cohesion
+	ret = pthread_mutex_init(&fileAccessMutex, NULL);
+	if(ret){
+		perror("pthread_mutex_init");
+		close(socketHandle);
+		exit(EXIT_FAILURE);
+	}
+	
 	//We have bound to the requested port, we can fork at this point if we're running as a daemon
 	if(runDaemon){
 		DEBUG_PRINT("Shifting to daemon\n");
 		//setup and fork. If a pid is returned (!= 0), we're the parent, and need to return.
 		if(makeDaemon())
-			return 0;
+			return EXIT_SUCCESS;
 	}
+	
+	
+	//Start the periodic timer to handle the 10second timestamp writes
+	timer_t *timerId = intervalTimerStart(&fileAccessMutex);
+	
 
 	//Begin listening for client connections
 	DEBUG_PRINT("Listening\n");
@@ -137,6 +160,11 @@ int main(int argc, char* argv[]){
 	//Loop until we've been told to exit (by a signal)
 	struct sockaddr addr;
 	while(!closeApplication){
+		
+		//Potential "livelock" situation between the !closeApplication check and
+		//	the accept() call below. If we receive a SIGINT/SIGTERM between these two
+		//	lines, we'll be stuck in accept until a client connects to us...
+		//	but i'm not sure how to fix that....
 	
 		//We can now block until an incomming connection is received. 
 		DEBUG_PRINT("Waiting for new connection...\n");
@@ -165,20 +193,55 @@ int main(int argc, char* argv[]){
 		syslog(LOG_INFO, "Accepted connection from %u.%u.%u.%u", 
 				ip >> 24, (ip >> 16) & 0xFF, (ip >> 8) & 0xFF, ip & 0xFF);
 				
+				
+		
+				
 		//We will now create a child process to handle the connection we just made.
 		//	This allows us to wait for more connections while we're still processing
 		//	a previous one. 
 		DEBUG_PRINT("Spawning child to handle request\n");
-		if(!fork()){
-			processConnection(clientSocket, ip);
-			//Should never get here since the processConnection should exit when complete
-			exit(1);
+		ll_t *li = ll_addItem();
+		if(!li){
+			syslog(LOG_ERR, "Unable to allocate arg content for new client thread");
+			close(clientSocket);
 		}
+		else{
+			li->ip = ip;
+			li->socket = clientSocket;
+			li->mutex = &fileAccessMutex;
+			
+			ret = pthread_create(&li->thread, NULL, processConnection, li);
+			if(ret){
+				perror("pthread_create");
+				ll_dropItem(li);
+				close(clientSocket);
+				syslog(LOG_ERR, "Unable to create child thread for client connection");
+			}
+		}
+
+		
 		
 		//Wait on any child threads that are complete. We don't actually wait, we
-		//	just collect any that are complete already (to de-zombie them)
-		while(waitpid(-1, NULL, WNOHANG) > 0)
-			;
+		//	just collect any that are complete already (to de-zombie them). In other
+		//	words we'll be ignoring the return values.
+		//
+		//	By checking for complete children after every new child, we ensure we don't 
+		//	hold as large of list of threads that need joined, and frees their resources
+		//	sooner. 
+		//
+		li = ll_getFirst();
+		while(li){
+			DEBUG_PRINT("Waiting for child 0x%08x\n", (unsigned int)li->thread);
+			if(!pthread_tryjoin_np(li->thread, NULL)){
+				DEBUG_PRINT("Child 0x%08x has completed\n", (unsigned int)li->thread);
+				
+				//The thread has exited, so we'll drop (free) the link list item
+				ll_dropItem(li);
+			}
+
+			li = ll_getNext();
+		}
+		
 		
 		//As the parent we continue processing more connections
 	}
@@ -186,6 +249,9 @@ int main(int argc, char* argv[]){
 	//We must have received a signal (where we set the closeApplication), so we're ready to exit.
 	syslog(LOG_INFO, "Caught signal, exiting");
 	printf("\nWaiting for connections to complete, and exiting...\n");
+	
+	//Cancel the timer
+	timer_delete(timerId);
 	
 	waitForChildren();
 	close(socketHandle);
