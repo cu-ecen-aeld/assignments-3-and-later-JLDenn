@@ -28,6 +28,13 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
 
+int aesd_open(struct inode *inode, struct file *filp);
+int aesd_release(struct inode *inode, struct file *filp);
+ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
+ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
+int aesd_init_module(void);
+void aesd_cleanup_module(void);
+
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
 int aesd_open(struct inode *inode, struct file *filp)
@@ -89,8 +96,9 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_p
 	if(!entry){
 		//We're out of data, so we'll return 0;
 		goto retValReady;
+	}
 		
-	size_t toCopy = MIN(count, entry->size - offset);
+	size_t toCopy = min(count, entry->size - offset);
 	unsigned long res = copy_to_user(buf, entry->buffptr + offset, toCopy);	
 	
 	//If res == 0 (success), retval == toCopy. Otherwise retval = toCopy - res (which is the same in both cases):
@@ -119,7 +127,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 
 	//The partialBuffer currently contains data, we'll be appending to that (krealloc)
 	if(dev->partialBuffer){
-		PDEBUG("We have a partial packet in work (%i bytes), we'll be adding more to it (%i bytes).", 
+		PDEBUG("We have a partial packet in work (%lu bytes), we'll be adding more to it (%lu bytes).", 
 				dev->partialBufferSize, count);
 				
 		char* tmp = krealloc(dev->partialBuffer, dev->partialBufferSize + count, GFP_KERNEL);
@@ -131,22 +139,22 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 	}
 	//No partial data is stored, we'll start a new packet
 	else{
-		PDEBUG("No data currently in the partial buffer, so we'll allocate memory for the block we received (%i bytes).", count);
+		PDEBUG("No data currently in the partial buffer, so we'll allocate memory for the block we received (%lu bytes).", count);
 		
-		dev->partialBuffer = kmalloc(count);
+		dev->partialBuffer = kmalloc(count, GFP_KERNEL);
 		if(!dev->partialBuffer)
 			goto retValReady;
 		
 		dev->partialBufferSize = count;
 	}
 
-	PDEBUG("Copying %i bytes from user space to our partialBuffer.", count);
+	PDEBUG("Copying %lu bytes from user space to our partialBuffer.", count);
 	//Copy from userspace. If we get a value != 0, that is how many bytes WEREN'T copied.
 	//	So, we'll return the number of bytes we could copy, leaving the partialBuffer size alone.
 	unsigned long res = copy_from_user(dev->partialBuffer, buf, count);
 	if(res){
 		retval = count - res;
-		goto retValready;
+		goto retValReady;
 	}
 	
 	//We've written the entire contents of count at this point, so this will be our return value.
@@ -163,7 +171,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 	//We have a \n in the partial buffer, we'll add it to the circular buffer
 	struct aesd_buffer_entry entry = {.buffptr = dev->partialBuffer, 
 										.size = (unsigned long)loc - (unsigned long)dev->partialBuffer + 1};
-	char* old = aesd_circular_buffer_add_entry(&dev->cirBuf, &entry);
+	const char* old = aesd_circular_buffer_add_entry(&dev->cirBuf, &entry);
 	if(old){
 		PDEBUG("The buffer was full, so we're freeing the dropped memory");
 		
@@ -232,10 +240,10 @@ int aesd_init_module(void)
     }
     memset(&aesd_device,0,sizeof(struct aesd_dev));
 
-	//aesd_dev.partialBufferSize		//already set to 0
-	//aesd_dev.partialBuffer			//already NULL
-	mutex_init(&aesd_dev.mutex);		//no return value
-	//aesd_dev.cirBuf					//already configured as empty (= {0})
+	//aesd_device.partialBufferSize		//already set to 0
+	//aesd_device.partialBuffer			//already NULL
+	mutex_init(&aesd_device.mutex);		//no return value
+	aesd_circular_buffer_init(&aesd_device.cirBuf);
 
     result = aesd_setup_cdev(&aesd_device);
 
@@ -257,7 +265,8 @@ void aesd_cleanup_module(void)
 
 	//We need to run through and free all the allocated memory from the cirBuf
 	uint8_t index;
-	AESD_CIRCULAR_BUFFER_FOREACH(struct aesd_buffer_entry *entry, aesd_device.cirBuf, index)
+	struct aesd_buffer_entry *entry;
+	AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.cirBuf, index)
 		kfree(entry->buffptr);
 	
 	//And free the partialBuffer if it was allocated
