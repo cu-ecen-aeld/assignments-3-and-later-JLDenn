@@ -81,9 +81,14 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(
 * Any necessary locking must be handled by the caller
 * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
 */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+const char * aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
+	//Initially, we'll assume we're not full. If we are, we'll update this to the entry being replaced. 
+	const char *retValue = NULL;
+	if(buffer->full)
+		retValue = buffer->entry[buffer->out_offs].buffptr;
 
+	
 	//Add the entry and increment the write pointer
 	memcpy(&buffer->entry[buffer->in_offs], add_entry, sizeof(*add_entry));
 	buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
@@ -91,10 +96,13 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
 	//If the buffer was already full, we need to advance the out_offs as well. Simply we can set them equal
 	if(buffer->full)
 		buffer->out_offs = buffer->in_offs;
-	
+
 	//If it wasn't full already, we'll check if it is now full. If so, we'll flag it as full
 	else if(buffer->in_offs == buffer->out_offs)
 		buffer->full = true;
+	
+	//Return NULL (if we aren't full), or the const char* to the memory buffer we're dropping (so it can be freed)
+	return retValue;
 }
 
 /**

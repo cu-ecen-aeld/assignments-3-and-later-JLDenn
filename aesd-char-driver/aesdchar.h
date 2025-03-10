@@ -8,6 +8,8 @@
 #ifndef AESD_CHAR_DRIVER_AESDCHAR_H_
 #define AESD_CHAR_DRIVER_AESDCHAR_H_
 
+#include "aesd_circular_buffer.h"
+
 #define AESD_DEBUG 1  //Remove comment on this line to enable debug
 
 #undef PDEBUG             /* undef it, just in case */
@@ -28,7 +30,13 @@ struct aesd_dev
     /**
      * TODO: Add structure(s) and locks needed to complete assignment requirements
      */
-    struct cdev cdev;     /* Char device structure      */
+	char *partialBuffer;		//Holds the partial buffer we'll use to store incomplete packets
+	uint32_t partialBufferSize;	//Holds the current allocated size of the partial buffer.
+	struct mutex mutex;			//holds the concurancy mutex for critical sections reguarding buffer and tree modifications
+	
+	struct aesd_circular_buffer cirBuf	//The actual buffer that holds 10 entries
+	
+    struct cdev cdev;     		/* Char device structure      */
 };
 
 
