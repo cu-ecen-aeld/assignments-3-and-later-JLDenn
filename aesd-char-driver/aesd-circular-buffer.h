@@ -14,7 +14,18 @@
 #include <stddef.h> // size_t
 #include <stdint.h> // uintx_t
 #include <stdbool.h>
+#include <stdio.h>
+//Define DEBUG to enable printfs. This will only work in !__KERNEL__ code.
+//#define DEBUG
 #endif
+
+
+#ifdef DEBUG
+#define DEBUG_PRINT(a, ...) printf(a, ##__VA_ARGS__)
+#else
+#define DEBUG_PRINT(a, ...)
+#endif
+
 
 #define AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED 10
 
