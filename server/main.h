@@ -11,10 +11,18 @@
 #define EXIT_FAILURE	-1
 
 #define BLOCK_SIZE		64
-#define FILE_PATH		"/var/tmp/aesdsocketdata"  
+ 
 
 #define TIMESTAMP_INTERVAL_S	10
 
+//Switch between file and driver (1 = driver)
+#define USE_AESD_CHAR_DEVICE	1
+
+#if USE_AESD_CHAR_DEVICE
+#define FILE_PATH		"/dev/aesdchar" 
+#else
+#define FILE_PATH		"/var/tmp/aesdsocketdata" 
+#endif
 
 //Comment this to remove the verbose prints
 //#define DEBUG

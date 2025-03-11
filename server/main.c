@@ -143,10 +143,10 @@ int main(int argc, char* argv[]){
 			return EXIT_SUCCESS;
 	}
 	
-	
+#if !USE_AESD_CHAR_DEVICE
 	//Start the periodic timer to handle the 10second timestamp writes
 	timer_t *timerId = intervalTimerStart(&fileAccessMutex);
-	
+#endif
 
 	//Begin listening for client connections
 	DEBUG_PRINT("Listening\n");
@@ -180,6 +180,12 @@ int main(int argc, char* argv[]){
 			syslog(LOG_ERR, "accept: %s", strerror(errno));
 			
 			close(socketHandle);
+			
+#if !USE_AESD_CHAR_DEVICE	
+			//Delete the data file
+			unlink(FILE_PATH);
+#endif
+
 			
 			waitForChildren();
 			exit(EXIT_FAILURE);
@@ -250,14 +256,18 @@ int main(int argc, char* argv[]){
 	syslog(LOG_INFO, "Caught signal, exiting");
 	printf("\nWaiting for connections to complete, and exiting...\n");
 	
+#if !USE_AESD_CHAR_DEVICE
 	//Cancel the timer
 	timer_delete(timerId);
+#endif
 	
 	waitForChildren();
 	close(socketHandle);
 	
+#if !USE_AESD_CHAR_DEVICE	
 	//Delete the data file
 	unlink(FILE_PATH);
+#endif 
 	
 	closelog();
 	exit(EXIT_SUCCESS);
