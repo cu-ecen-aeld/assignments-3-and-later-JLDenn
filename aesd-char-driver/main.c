@@ -39,7 +39,7 @@ void aesd_cleanup_module(void);
 ////////////////////////////////////////////////////////////////////////////////////////
 int aesd_open(struct inode *inode, struct file *filp)
 {
-    PDEBUG("open");
+    PDEBUG("-open");
 
 	//Get our dev structure
 	struct aesd_dev *dev = container_of(inode->i_cdev, struct aesd_dev, cdev);
@@ -54,21 +54,10 @@ int aesd_open(struct inode *inode, struct file *filp)
 ////////////////////////////////////////////////////////////////////////////////////////
 int aesd_release(struct inode *inode, struct file *filp)
 {
-    PDEBUG("release");
+    PDEBUG("-release");
 
 	//Get our dev structure
-	struct aesd_dev *dev = (struct aesd_dev *)filp->private_data;
-	
-	//Free the partial buffer if needed
-	if(mutex_lock_interruptible(&dev->mutex))
-		return -ERESTARTSYS;
-	
-	if(dev->partialBuffer){
-		kfree(dev->partialBuffer);
-		dev->partialBuffer = NULL;
-		dev->partialBufferSize = 0;
-	}
-	mutex_unlock(&dev->mutex);
+	//struct aesd_dev *dev = (struct aesd_dev *)filp->private_data;
 	
 	//We will be leaving the rest of the circular buffer and its data since it may be accessed
 	//	again. It will be freed during cleanup.
@@ -81,7 +70,7 @@ int aesd_release(struct inode *inode, struct file *filp)
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = 0;
-    PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
+    PDEBUG("-read %zu bytes with offset %lld",count,*f_pos);
 
 	//Get our dev structure
 	struct aesd_dev *dev = (struct aesd_dev *)filp->private_data;
@@ -91,6 +80,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_p
 		return -ERESTARTSYS;
 	
 	
+	PDEBUG("Seaching circular buffer for offset %lld", *f_pos);
 	size_t offset;
 	struct aesd_buffer_entry *entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->cirBuf, *f_pos, &offset);
 	if(!entry){
@@ -98,15 +88,21 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_p
 		goto retValReady;
 	}
 		
+	
 	size_t toCopy = min(count, entry->size - offset);
+	
+	PDEBUG("Found entry, %lu offset. We'll copy %lu bytes to user space", offset, toCopy);
 	unsigned long res = copy_to_user(buf, entry->buffptr + offset, toCopy);	
 	
 	//If res == 0 (success), retval == toCopy. Otherwise retval = toCopy - res (which is the same in both cases):
 	retval = toCopy - res;
+	
 	*f_pos += retval;
+	PDEBUG("Copy complete, updated f_pos: %lld", *f_pos);
 
-		
+	
 retValReady:
+	PDEBUG("Unlocking mutex");
 	mutex_unlock(&dev->mutex);
     return retval;
 }
@@ -116,7 +112,8 @@ retValReady:
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
-    PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
+    PDEBUG("-write %zu bytes with offset %lld",count,*f_pos);
+	size_t offset = 0;
 	
 	//Get our dev structure
 	struct aesd_dev *dev = (struct aesd_dev *)filp->private_data;
@@ -135,7 +132,9 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 			goto retValReady;
 		
 		dev->partialBuffer = tmp;
+		offset = dev->partialBufferSize;
 		dev->partialBufferSize += count;
+		PDEBUG("New partialBufferSize: %lu", dev->partialBufferSize);
 	}
 	//No partial data is stored, we'll start a new packet
 	else{
@@ -151,7 +150,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff
 	PDEBUG("Copying %lu bytes from user space to our partialBuffer.", count);
 	//Copy from userspace. If we get a value != 0, that is how many bytes WEREN'T copied.
 	//	So, we'll return the number of bytes we could copy, leaving the partialBuffer size alone.
-	unsigned long res = copy_from_user(dev->partialBuffer, buf, count);
+	unsigned long res = copy_from_user(dev->partialBuffer + offset, buf, count);
 	if(res){
 		retval = count - res;
 		goto retValReady;
@@ -229,6 +228,7 @@ static int aesd_setup_cdev(struct aesd_dev *dev)
 ////////////////////////////////////////////////////////////////////////////////////////
 int aesd_init_module(void)
 {
+	PDEBUG("-Initializing module (loading)");
     dev_t dev = 0;
     int result;
     result = alloc_chrdev_region(&dev, aesd_minor, 1,
@@ -258,9 +258,12 @@ int aesd_init_module(void)
 ////////////////////////////////////////////////////////////////////////////////////////
 void aesd_cleanup_module(void)
 {
-    dev_t devno = MKDEV(aesd_major, aesd_minor);
+    PDEBUG("-Cleaning up module (unloading)");
+	
+	dev_t devno = MKDEV(aesd_major, aesd_minor);
 
     cdev_del(&aesd_device.cdev);
+	
 
 
 	//We need to run through and free all the allocated memory from the cirBuf
