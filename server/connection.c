@@ -36,7 +36,6 @@ void *processConnection(void *arg){
 	int dataSize = BLOCK_SIZE;
 	int dataLen = 0;
 	int outf = -1;
-	int rc;
 	ssize_t byteCount;
 	
 	DEBUG_PRINT("--Starting data receive loop\n");
@@ -110,14 +109,16 @@ void *processConnection(void *arg){
 		}
 	
 		
+#if !USE_AESD_CHAR_DEVICE
 		//Obtain the mutex used to maintain file write integrety.
 		DEBUG_PRINT("--Locking the mutex for file write access\n");
-		rc=pthread_mutex_lock(connectionItem->mutex);
+		int rc=pthread_mutex_lock(connectionItem->mutex);
 		if(rc){
 			errno = rc;
 			perror("pthread_mutex_lock");
 			goto cleanupFail;
 		}
+#endif
 		
 		//Write the data to the file we opened above
 		DEBUG_PRINT("--Writing data to the output file %s\n", FILE_PATH);
@@ -159,7 +160,7 @@ void *processConnection(void *arg){
 			}
 		}while(byteCount);
 		
-		
+#if !USE_AESD_CHAR_DEVICE		
 		//Release the mutex
 		DEBUG_PRINT("--Unocking the mutex\n");
 		rc=pthread_mutex_unlock(connectionItem->mutex);
@@ -168,6 +169,7 @@ void *processConnection(void *arg){
 			perror("pthread_mutex_unlock");
 			goto cleanupFail;
 		}
+#endif
 		
 		
 		DEBUG_PRINT("--Closing file\n");
@@ -193,11 +195,14 @@ void *processConnection(void *arg){
 
 //On fail inside the locked mutex area, we need to unlock that before we exit!
 cleanupFailInLock:
+#if !USE_AESD_CHAR_DEVICE
 	rc=pthread_mutex_unlock(connectionItem->mutex);
 	if(rc){
 		errno = rc;
 		perror("pthread_mutex_unlock");
 	}
+#endif
+
 //On fail, we need to complete cleanup
 cleanupFail:
 	if(outf != -1)
