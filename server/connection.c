@@ -10,9 +10,12 @@
 #include <syslog.h>
 #include <signal.h> 
 #include <pthread.h>
+#include "../aesd-char-driver/aesd_ioctl.h"
 
 #include "linklist.h"
 #include "main.h"
+
+#define COMMAND_SEEKTO	"AESDCHAR_IOCSEEKTO:"
 
 
 /***********************************************************************************
@@ -118,6 +121,29 @@ void *processConnection(void *arg){
 			perror("pthread_mutex_lock");
 			goto cleanupFail;
 		}
+		
+#else	// meaning USE_AESD_CHAR_DEVICE == 1
+		DEBUG_PRINT("--Checking if packet is a defined command\n");
+		if(!memcmp(recvData, COMMAND_SEEKTO, sizeof(COMMAND_SEEKTO)-1)){
+			struct aesd_seekto st;
+			if(sscanf((char*)recvData + sizeof(COMMAND_SEEKTO) - 1, "%u,%u", &st.write_cmd, &st.write_cmd_offset) != 2){
+				//Overwrite the \n with a \0 so we can include it in the error log entry.
+				recvData[dataLen-1] = '\0';
+				syslog(LOG_ERR, "seekto command format invalid: %s", recvData);
+				goto cleanupFailInLock;
+			}
+			
+			DEBUG_PRINT("--Sending ioctl comamnd with st: %u, %u\n", st.write_cmd, st.write_cmd_offset);
+			if(ioctl(outf, AESDCHAR_IOCSEEKTO, &st)){
+				//In this case, we'll print an error to the screen, but not return anything to the client. 
+				//This is the case where the command is properly formated, but the numbers are invalid, and
+				//	since we don't have a better way to let the remote client know, we'll just send back nothing.
+				perror("aesdchar_seekto");
+				goto cleanupFailInLock;
+			}
+		}
+		else{
+
 #endif
 		
 		//Write the data to the file we opened above
@@ -130,6 +156,11 @@ void *processConnection(void *arg){
 		
 		//Now rewind and read the entire file so we can send it
 		lseek(outf, 0, SEEK_SET);
+		
+#if USE_AESD_CHAR_DEVICE
+		}
+#endif
+		
 		
 		//Loop until we get all the data in the file sent off to the client
 		//	We'll be re-using the buffer we malloc'd above since we have that

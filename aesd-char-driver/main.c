@@ -19,6 +19,7 @@
 #include <linux/fs.h> // file_operations
 #include <linux/mutex.h>
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
@@ -28,16 +29,17 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
 
-int aesd_open(struct inode *inode, struct file *filp);
-int aesd_release(struct inode *inode, struct file *filp);
-ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
-ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
-int aesd_init_module(void);
-void aesd_cleanup_module(void);
+// int aesd_open(struct inode *inode, struct file *filp);
+// int aesd_release(struct inode *inode, struct file *filp);
+// ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
+// ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
+// loff_t aesd_seek(struct file* filp, loff_t f_pos, int whence);
+// int aesd_init_module(void);
+// void aesd_cleanup_module(void);
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
-int aesd_open(struct inode *inode, struct file *filp)
+static int aesd_open(struct inode *inode, struct file *filp)
 {
     PDEBUG("-open");
 
@@ -52,7 +54,7 @@ int aesd_open(struct inode *inode, struct file *filp)
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
-int aesd_release(struct inode *inode, struct file *filp)
+static int aesd_release(struct inode *inode, struct file *filp)
 {
     PDEBUG("-release");
 
@@ -65,9 +67,71 @@ int aesd_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
+
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
-ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
+static long aesd_ioctl (struct file *filp, unsigned int cmd, unsigned long argp){
+	
+	PDEBUG("-ioctl, cmd = %u",cmd);
+	
+	//Default to bad value so we can just fall through in that case.
+	long retVal = -EINVAL;
+	
+	//Get our dev structure
+	struct aesd_dev *dev = (struct aesd_dev *)filp->private_data;
+	
+	switch(cmd){
+		case AESDCHAR_IOCSEEKTO:{
+		
+			PDEBUG("Received a seekto cmd");
+			//Get the seekto structure from user space.
+			struct aesd_seekto st;
+			if(copy_from_user(&st, (void*)argp, sizeof(st)))
+				return -EFAULT;
+			
+			PDEBUG("write_cmd = %u, write_cmd_offset = %u", st.write_cmd, st.write_cmd_offset);
+		
+			PDEBUG("Getting the mutex lock");
+			if(mutex_lock_interruptible(&dev->mutex))
+				return -ERESTARTSYS;
+			
+			int index;
+			off_t cumulativeOffset = 0;
+			struct aesd_buffer_entry *entry;
+			
+			//Loop through all the entries. If we end up at an index that matches write_cmd, we'll 
+			//	check the write_cmd_offset and complete. But, if we never find write_cmd, we know
+			//	it was invalid, so we'll finish the loop and exit with the inital value of -EINVAL set. 
+			AESD_CIRCULAR_BUFFER_FOREACH(entry, &aesd_device.cirBuf, index){
+				if(	index == st.write_cmd ){
+					//See if the cmd_offset is valid
+					if(st.write_cmd_offset >= entry->size)
+						break;
+					
+					//We have a valid location, set the f_pos and return;
+					filp->f_pos = cumulativeOffset + st.write_cmd_offset;
+					retVal = 0;
+					break;
+				}
+				else {
+					cumulativeOffset += entry->size;
+				}
+			}	
+
+
+			PDEBUG("Unlocking the mutex");
+			mutex_unlock(&dev->mutex);			
+			
+			break;}
+	}
+
+
+	return retVal;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////
+static ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = 0;
     PDEBUG("-read %zu bytes with offset %lld",count,*f_pos);
@@ -109,7 +173,7 @@ retValReady:
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
-ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
+static ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
     PDEBUG("-write %zu bytes with offset %lld",count,*f_pos);
@@ -193,6 +257,67 @@ retValReady:
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
+static loff_t aesd_seek(struct file* filp, loff_t f_pos, int whence){
+	
+	PDEBUG("-seek to offset %lli from %d",f_pos, whence);
+	
+	//Get our dev structure
+	struct aesd_dev *dev = (struct aesd_dev *)filp->private_data;
+	
+	loff_t newPos = 0;
+	size_t dataSize = 0;
+	
+	//First we need to get the size of the data set, which we'll use for SEEK_END, and 
+	//	range checking at the end.
+	PDEBUG("Getting the mutex lock");
+	if(mutex_lock_interruptible(&dev->mutex))
+		return -ERESTARTSYS;
+	
+	PDEBUG("Calculating current length");
+	uint8_t index;
+	struct aesd_buffer_entry *entry;
+	AESD_CIRCULAR_BUFFER_FOREACH(entry, &dev->cirBuf, index)
+		dataSize += entry->size;	
+	
+	
+	//Now we'll set the newPos value based on where the user wants us to move to.
+	switch(whence){
+		case SEEK_SET:
+			newPos = f_pos;
+			break;
+		case SEEK_CUR:
+			newPos = filp->f_pos + f_pos;
+			break;
+		case SEEK_END:
+			newPos = dataSize + f_pos;
+			break;		
+		default:
+			//Here we'll just set to -1 so we'll return EINVAL after we release the mutex
+			newPos = -1;
+	}
+	
+	PDEBUG("User wishes to seek to %lli", newPos);
+	
+	//Check if the newPos is valid.
+	if(newPos < 0 || newPos > dataSize){
+		PDEBUG("That position is invalid: < 0 or > %li", dataSize);
+		newPos = -EINVAL;
+	}
+	else{
+		filp->f_pos = newPos;
+	}
+
+	PDEBUG("Unlocking the mutex");
+	mutex_unlock(&dev->mutex);
+	
+	//Return the new position, or the error.
+	return newPos;
+}
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////
 ///								INIT/CLEANUP
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -207,6 +332,8 @@ struct file_operations aesd_fops = {
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+	.llseek = 	aesd_seek,
+	.unlocked_ioctl =	aesd_ioctl,
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -226,7 +353,7 @@ static int aesd_setup_cdev(struct aesd_dev *dev)
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
-int aesd_init_module(void)
+static int aesd_init_module(void)
 {
 	PDEBUG("-Initializing module (loading)");
     dev_t dev = 0;
@@ -256,7 +383,7 @@ int aesd_init_module(void)
 
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
-void aesd_cleanup_module(void)
+static void aesd_cleanup_module(void)
 {
     PDEBUG("-Cleaning up module (unloading)");
 	
